@@ -1,91 +1,102 @@
-import os
-from dotenv import load_dotenv
-import chromadb
+import json
 
-import build_database
-import preprocess
+from config import TOP_N
 
-
-law_types = ["민법", "민사소송법", "상법", "헌법", "형법", "형사소송법"]
-n_of_jud = [930, 454, 516, 331, 498, 416-1]  # 각 법률별 판례 수
-jud_start_page = [9, 29, 45, 3, 27, 33]  # 각 법률별 본문 시작 페이지 번호
-jud_end_page = [635, 339, 548, 312, 454, 401]  # 각 법률별 본문 종료 페이지 번호
-
-preprocess.run(
-    law_types,
-    n_of_jud,
-    jud_start_page,
-    jud_end_page,
-    redo=[True, True])
-build_database.run(
-    law_types,
-    n_of_jud,
-    [True])
-
-
-# === 환경변수 로드 ===
-load_dotenv(".env")
-JINA_API_KEY = os.getenv("JINA_API_KEY")
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-if not JINA_API_KEY:
-    raise ValueError("Can't find JINA_API_KEY")
-if not HUGGINGFACE_API_KEY:
-    raise ValueError("Can't find HUGGINGFACE_API_KEY")
-
-# DB 열기
-client = chromadb.PersistentClient(path="./chroma_db")
-public_jud_collection = client.get_collection(name="public_judgements")
-private_jud_collection = client.get_collection(name="private_judgements")
-
-query_texts = ["중고거래 판매자가 입금 이후에 물건을 주지 않고 사라졌다면 판매자는 어떤 처벌을 받게 될까?"]
-query_result_pub = public_jud_collection.query(
-    query_texts=query_texts,
-    n_results=3,
-    include=["documents", "metadatas", "distances"]
-)
-query_result_prv = private_jud_collection.query(
-    query_texts=query_texts,
-    n_results=3,
-    include=["documents", "metadatas", "distances"]
-)
-
-# public 결과 출력
-result = []
-result.append("=== Public 판례 검색 결과 ===")
-for i, (doc, meta, dist) in enumerate(zip(
-    query_result_pub['documents'][0],
-    query_result_pub['metadatas'][0],
-    query_result_pub['distances'][0]
-)):    
-    result.append(f"결과 {i+1}")
-    result.append(f"법령 종류: {meta.get('law_type')}")
-    result.append(f"제목: {meta.get('제목')}")
-    result.append(f"판례번호: {meta.get('판례번호')}")
-    result.append(f"판결요지: {meta.get('판결요지')}")
-    result.append(f"선정이유: {meta.get('선정이유')}")
-    result.append(f"유사도 거리: {dist}")
-    result.append(f"본문 일부(쟁점): {doc}")
-    result.append("-"*80)
-
+# 사용자 질문을 api로 명료화
+def clarify_user_query(query: str, openai_client):
+    prompt = f"""
+    사용자의 질문을 법률 검색용으로 명료화된 문장으로 변환해줘.
+    단순 키워드가 아니라, 검색 시 관련 판례가 잘 걸리도록 자연스러운 문장으로 만들어.
     
-# private 결과 출력
-result.append("\n=== Private 판례 검색 결과 ===")
-for i, (doc, meta, dist) in enumerate(zip(
-    query_result_prv['documents'][0],
-    query_result_prv['metadatas'][0],
-    query_result_prv['distances'][0]
-)):
-    result.append(f"결과 {i+1}")
-    result.append(f"법령 종류: {meta.get('law_type')}")
-    result.append(f"제목: {meta.get('제목')}")
-    result.append(f"판례번호: {meta.get('판례번호')}")
-    result.append(f"판결요지: {meta.get('판결요지')}")
-    result.append(f"선정이유: {meta.get('선정이유')}")
-    result.append(f"유사도 거리: {dist}")
-    result.append(f"본문 일부(쟁점): {doc}")
-    result.append("-"*80)
+    예:
+    "아파트 보증금을 못 돌려받으면 형사고소 가능한가요?" -> 
+    "임대차 계약에서 보증금 반환 지연 시 형사처벌 사례"
+
+    질문: "{query}"
+    """
+    response = openai_client.responses.create(
+        model="gpt-5-mini",
+        input=prompt
+    )
+    return response.output_text.strip()
 
 
-with open("./query_result.txt", "w", encoding="utf-8") as f:
-    f.write("\n".join(result))
-    f.truncate()
+def keyword_user_query(query:str, openai_client):
+    prompt = f"""
+    다음 사용자 질문에서 법령정보센터 검색용 키워드를 추출해줘.
+    - 핵심 명사, 사건 유형, 법률 관련 용어 위주
+    - 불필요한 문장과 일반 단어(있다, 되다 등)는 제외
+    - 결과는 콤마(,)로 구분된 문자열로 출력
+    
+    예:
+    "아파트 보증금을 못 돌려받으면 형사고소 가능한가요?" -> 
+    "임대차, 보증금, 반환, 형사처벌, 사례"
+
+    질문: "{query}"
+    """
+    response = openai_client.responses.create(
+        model="gpt-5-mini",
+        input=prompt
+    )
+    keywords = response.output_text.strip()
+    # 필요하면 리스트로 변환 가능
+    return [k.strip() for k in keywords.split(',')]
+
+
+# 관련판례 검색 결과 -> json 으로 만드는 함수
+def structure_results(result):
+    structured = []
+    for doc, meta, dist in zip(result['documents'][0], result['metadatas'][0], result['distances'][0]):
+        structured.append({
+            "유사도거리": dist,
+            "내용": doc,
+            "법령종류": meta.get("law_type", ""),
+            "제목": meta.get("제목", ""),
+            "판례번호": meta.get("판례번호", ""),
+            "선정이유": meta.get("선정이유", "")
+        })
+    return structured
+
+
+def run(openai_client,
+        public_jud_collection,
+        private_jud_collection,
+        user_query):
+
+    # 질의 의미적으로 명료화 (내부 chromaDB에서 검색하는 용도) TODO: ON/OFF비교
+    clarified_query = clarify_user_query(user_query, openai_client)
+
+    # public 판례 검색
+    result_pub = public_jud_collection.query(
+        query_texts=clarified_query,
+        n_results=TOP_N,
+        include=["documents", "metadatas", "distances"]
+    )
+    # private 판례 검색
+    result_prv = private_jud_collection.query(
+        query_texts=clarified_query,
+        n_results=TOP_N,
+        include=["documents", "metadatas", "distances"]
+    )
+    
+    
+    
+    # 중요한 키워드 추출 (법령정보센터 Open API에 이용) TODO
+    keyword_query = keyword_user_query(user_query, openai_client)
+    print(f"명료화된 쿼리: {clarified_query}\n키워드추출된 쿼리: {keyword_query}")
+    
+    ###### TODO: 법령정보센터 API로 검색 결과 처리 ######
+    # 음.. 아예 chromadb를 내부 rag로 하고 외부 판례는 법령정보센터 api로 할까?
+    # 이게 잘 동작한다면 말이지
+    
+    query_result = {
+        "query": user_query,
+        "expanded_query": clarified_query,
+        "public": structure_results(result_pub),
+        "private": structure_results(result_prv)
+    }
+
+    # JSON 파일로 저장
+    output_path = "./query_result.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(query_result, f, ensure_ascii=False, indent=2)

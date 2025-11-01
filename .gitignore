@@ -12,7 +12,7 @@ venv/
 .vscode/
 .idea/
 
-# 나머지
-aihubshell
-query_result.txt
+# 산출물들
+answer.txt
+*_result.json
 test.py
