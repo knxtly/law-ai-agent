@@ -14,5 +14,9 @@ venv/
 
 # 산출물들
 answer.txt
-*_result.json
+*.json
+*.txt
 test.py
+
+# 예외
+!requirements.txt
