@@ -1,9 +1,6 @@
 # Python 캐시
 __pycache__/
 
-# ChromaDB 로컬 데이터
-chroma_db/
-
 # 가상환경
 venv/
 .env
@@ -13,7 +10,6 @@ venv/
 .idea/
 
 # 산출물들
-answer.txt
 *.json
 *.txt
 test.py

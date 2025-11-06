@@ -109,7 +109,7 @@ def build(force: bool):
     init_db?
     """
     # === ChromaDB Client & Collection 생성 ===
-    client = chromadb.PersistentClient(path="./chroma_db") # 영구 저장 클라이언트
+    client = chromadb.PersistentClient(path="./data/chroma_db") # 영구 저장 클라이언트
     judgement_collection = client.get_or_create_collection(
         name="judgement_collection",
         embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(

@@ -113,11 +113,12 @@ def ask_question(data: UserQuery):
     
     print("로컬 저장 중...")
     def save_result():
-        with open("./answer.txt", "w", encoding="utf-8") as f:
+        with open("./conversation.txt", "w", encoding="utf-8") as f:
             f.write(f"=== 세션: {session_id} ===\n")
-            for turn in session_data[session_id]["history"]:
-                f.write(f"\n사용자: {turn['user']}\n")
-                f.write(f"법률상담봇: {turn['assistant']}\n")
+            for i, turn in enumerate(session_data[session_id]["history"]):
+                f.write(f"### turn {i} ###\n")
+                f.write(f"  - 사용자:\n{turn['user']}\n\n")
+                f.write(f"  - 법률상담봇:\n{turn['assistant']}\n")
     save_result()
     
     return {"answer": answer}
