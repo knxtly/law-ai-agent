@@ -1,10 +1,11 @@
 import streamlit as st
 import requests
 import uuid
+import os
 
 # 페이지 설정
-st.set_page_config(page_title="RAG기반 AI법률상담챗봇", layout="centered")
-st.title("RAG기반 AI 법률상담 챗봇")
+st.set_page_config(page_title="Law AI AGENT", layout="centered")
+st.title("Law AI AGENT")
 
 # === 고유 세션 ID 생성 (대화 연결용) ===
 if "session_id" not in st.session_state:
@@ -23,6 +24,32 @@ with st.sidebar:
                 st.success(res.json()["message"])
             except Exception as e:
                 st.error(f"DB 업데이트 실패: {e}")
+    st.divider()
+    st.subheader("대화 다운로드")
+    if st.button("대화 다운로드"):
+        with st.spinner("대화 파일 생성 중..."):
+            try:
+                res = requests.get(f"http://127.0.0.1:8000/download_conversation/{st.session_state.session_id}")
+                res.raise_for_status()
+                data = res.json()
+                if data.get("status") == "ok":
+                    path = data.get("path")
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as f:
+                            file_data = f.read()
+                        st.download_button(
+                            label="📥 conversation.txt 다운로드",
+                            data=file_data,
+                            file_name="conversation.txt",
+                            mime="text/plain"
+                        )
+                    else:
+                        st.error("conversation.txt 파일을 찾을 수 없습니다.")
+                else:
+                    st.error(data.get("error", "대화 다운로드 실패"))
+            except Exception as e:
+                st.error(f"오류 발생: {e}")
+
 
 st.caption(f"Session ID: `{st.session_state.session_id}`")  # 디버깅용 표시
 st.divider()

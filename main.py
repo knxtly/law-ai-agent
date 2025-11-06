@@ -122,3 +122,20 @@ def ask_question(data: UserQuery):
     save_result()
     
     return {"answer": answer}
+
+# 다운로드 요청 시 파일 생성
+@app.get("/download_conversation/{session_id}")
+def download_conversation(session_id: str):
+    if session_id not in session_data:
+        return {"error": "해당 세션의 대화가 없습니다."}
+    
+    path = "./conversation.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"=== 세션: {session_id} ===\n")
+        for i, turn in enumerate(session_data[session_id]["history"]):
+            f.write(f"### turn {i} ###\n")
+            f.write(f"  - 사용자:\n{turn['user']}\n\n")
+            f.write(f"  - 법률상담봇:\n{turn['assistant']}\n")
+    
+    return {"status": "ok", "message": "대화 저장 완료", "path": path}
+
