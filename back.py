@@ -43,7 +43,8 @@ def ask_question(data: UserQuery):
         session_data[session_id] = {"conversation_id": None, "history": []}
     
     # RAG포함 검색 수행 (전문가: True, 일반 사용자: False)
-    search_result_rag, search_result_api = query.search_query(openai_client, judgement_collection, user_query, True)
+    search_result_rag, search_result_api = query.search_query(openai_client, judgement_collection, user_query,
+                                                              use_rag=True, clarify_q=True)
     
     print("검색 결과로부터 context 구성 중...")
     def build_context(search_result):
