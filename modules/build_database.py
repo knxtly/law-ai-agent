@@ -1,3 +1,9 @@
+# 루트디렉토리 추가해서 따로 실행해도 모듈 임포트 가능하게 함
+import os, sys
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import chromadb
 from chromadb.utils import embedding_functions
 import re
@@ -67,27 +73,33 @@ def parse_chunk(chunk: str):
 
 
 # === collection에 임베딩 저장 ===
-def add_to_collection(law, chunks, collection):
+def add_to_collection(law, chunks, collection, do_parse=True):
     docs, metas, ids = [], [], []
-    for i, chunk in enumerate(chunks):
-        parsed = parse_chunk(chunk)
-        if not parsed["내용"]:
-            continue
-        docs.append(parsed["내용"])
-        metas.append({
-            "law_type": law,
-            "제목": parsed["제목"],
-            "판례번호": parsed["판례번호"],
-            "선정이유": parsed["선정이유"]
-        })
-        ids.append(f"{law}_{i + 1}")
+    if do_parse:
+        for i, chunk in enumerate(chunks):
+            parsed = parse_chunk(chunk)
+            if not parsed["내용"]:
+                continue
+            docs.append(parsed["내용"])
+            metas.append({
+                "law_type": law,
+                "제목": parsed["제목"],
+                "판례번호": parsed["판례번호"],
+                "선정이유": parsed["선정이유"]
+            })
+            ids.append(f"{law}_{i + 1}")
+    else:
+        for i, chunk in enumerate(chunks):
+            docs.append(chunk)
+            metas.append({"law_type": law})
+            ids.append(f"{law}_{i + 1}")
     if docs:
         collection.add(documents=docs, metadatas=metas, ids=ids)
     return len(docs)
 
 
 # === 데이터베이스 처음부터 구성 ===
-def rebuild_db(judgement_collection, law_types):
+def rebuild_db(judgement_collection, law_types, do_parse):
     # 데이터 삭제
     for law in law_types:
         judgement_collection.delete(where={"law_type":law})
@@ -99,11 +111,11 @@ def rebuild_db(judgement_collection, law_types):
         if len(chunks) != n_of_jud[i]:
             print(f" [Warning] {law}: 전처리 중 chunk 개수와 판례개수가 맞지 않음: {chunks} / {n_of_jud[i]}")
         
-        num_of_added_judgement = add_to_collection(law, chunks, judgement_collection)
+        num_of_added_judgement = add_to_collection(law, chunks, judgement_collection, do_parse)
         print(f"{law}: {num_of_added_judgement} / {len(chunks)} saved.")
     
 
-def build(force: bool):
+def build(force: bool, do_parse: bool=True):
     """
     force:
     init_db?
@@ -123,6 +135,21 @@ def build(force: bool):
     )
     
     if force:
-        rebuild_db(judgement_collection, law_types)
+        rebuild_db(judgement_collection, law_types, do_parse)
     
     return client, judgement_collection
+
+if __name__ == "__main__":
+    # TODO: chunking 정책 비교
+    import query
+
+    print(" [[[ test start ]]]")
+    client, judgement_collection = build(force=False, do_parse=False)
+    user_query = "아파트 보증금을 못 돌려받으면 어떻게 해야 하나요?"
+    
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    query.search_query(openai_client, judgement_collection, user_query, use_rag=True, clarify_q=True)
+    print(" [[[ test complete ]]]")
