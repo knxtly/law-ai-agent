@@ -31,22 +31,12 @@ with st.sidebar:
             try:
                 res = requests.get(f"http://127.0.0.1:8000/download_conversation/{st.session_state.session_id}")
                 res.raise_for_status()
-                data = res.json()
-                if data.get("status") == "ok":
-                    path = data.get("path")
-                    if os.path.exists(path):
-                        with open(path, "r", encoding="utf-8") as f:
-                            file_data = f.read()
-                        st.download_button(
-                            label="📥 conversation.txt 다운로드",
-                            data=file_data,
-                            file_name="conversation.txt",
-                            mime="text/plain"
-                        )
-                    else:
-                        st.error("conversation.txt 파일을 찾을 수 없습니다.")
-                else:
-                    st.error(data.get("error", "대화 다운로드 실패"))
+                st.download_button(
+                    label="📥 대화목록 다운로드",
+                    data=res.text,
+                    file_name="conversation.txt",
+                    mime="text/plain"
+                )
             except Exception as e:
                 st.error(f"오류 발생: {e}")
 

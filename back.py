@@ -73,35 +73,43 @@ def ask_question(data: UserQuery):
             context_rag = context_rag[:max_len] + "..."
         if context_api and len(context_api) > max_len:
             context_api = context_api[:max_len] + "..."
-
-        prompt = f"""        
-        당신은 전문 법률상담 챗봇입니다.
-        사용자의 질문에 대해 아래 판례 및 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
-        - 유사한 판례가 없는 경우: "관련 판례를 찾지 못했습니다"라고 말하고 법조문 중심으로 설명하세요.
-        - 가능한 한 법조문이나 판례의 문맥을 유지해서 설명하세요.
-
-        [사용자 질문]
-        {user_query}
-
-        [검색된 내부 판례]
-        {context_rag}
         
-        [검색된 공개 판례]
-        {context_api}
-        """
-        
-        # 세션별 conversation 이어가기
+        # 처음 대화면 conversation 생성
+        if session_data[session_id]["conversation_id"] is None:
+            conversation = openai_client.conversations.create(
+                items=[
+                    {
+                        "role": "system",
+                        "content": """You are a helpful legal assistant bot.
+                        사용자의 질문에 대해 아래 판례 및 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
+                        - 유사한 판례가 없는 경우: "관련 판례를 찾지 못했습니다"라고 말하고 법조문 중심으로 설명하세요.
+                        - 가능한 한 법조문이나 판례의 문맥을 유지해서 설명하세요."""
+                    }
+                ]
+            )
+            session_data[session_id]["conversation_id"] = conversation.id
+
         conversation_id = session_data[session_id]["conversation_id"]
         
         response = openai_client.responses.create(
             model="gpt-5-mini",
-            input=prompt,
-            conversation=conversation_id
+            conversation=conversation_id,
+            input=[
+                {
+                    "role": "user",
+                    "content": f"""
+                    [사용자 질문]
+                    {user_query}
+                    
+                    [검색된 내부 판례]
+                    {context_rag}
+                    
+                    [검색된 공개 판례]
+                    {context_api}
+                    """
+                }
+            ]
         )
-        
-        # 새 conversation이면 저장
-        if session_data[session_id]["conversation_id"] is None:
-            session_data[session_id]["conversation_id"] = response.conversation
         
         return getattr(response, "output_text", "").strip()
     answer = generate_answer(user_query, context_rag, context_api)
@@ -112,16 +120,6 @@ def ask_question(data: UserQuery):
         "assistant": answer
     })
     
-    print("로컬 저장 중...")
-    def save_result():
-        with open("./conversation.txt", "w", encoding="utf-8") as f:
-            f.write(f"=== 세션: {session_id} ===\n")
-            for i, turn in enumerate(session_data[session_id]["history"]):
-                f.write(f"### turn {i} ###\n")
-                f.write(f"  - 사용자:\n{turn['user']}\n\n")
-                f.write(f"  - 법률상담봇:\n{turn['assistant']}\n")
-    save_result()
-    
     return {"answer": answer}
 
 # 다운로드 요청 시 파일 생성
@@ -130,13 +128,11 @@ def download_conversation(session_id: str):
     if session_id not in session_data:
         return {"error": "해당 세션의 대화가 없습니다."}
     
-    path = "./conversation.txt"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(f"=== 세션: {session_id} ===\n")
-        for i, turn in enumerate(session_data[session_id]["history"]):
-            f.write(f"### turn {i} ###\n")
-            f.write(f"  - 사용자:\n{turn['user']}\n\n")
-            f.write(f"  - 법률상담봇:\n{turn['assistant']}\n")
+    lines = [f"=== 세션: {session_id} ===\n"]
+    for i, turn in enumerate(session_data[session_id]["history"]):
+        lines.append(f"### turn {i} ###\n")
+        lines.append(f"  - 사용자:\n{turn['user']}\n\n")
+        lines.append(f"  - 법률상담봇:\n{turn['assistant']}\n\n")
     
-    return {"status": "ok", "message": "대화 저장 완료", "path": path}
+    return "".join(lines)
 
