@@ -120,19 +120,30 @@ def ask_question(data: UserQuery):
         "assistant": answer
     })
     
-    return {"answer": answer}
+    return {
+        "status": "ok",
+        "answer": answer
+    }
 
 # 다운로드 요청 시 파일 생성
 @app.get("/download_conversation/{session_id}")
 def download_conversation(session_id: str):
     if session_id not in session_data:
-        return {"error": "해당 세션의 대화가 없습니다."}
+        return {"status": "error", "message": "해당 세션의 대화가 없습니다."}
     
     lines = [f"=== 세션: {session_id} ===\n"]
     for i, turn in enumerate(session_data[session_id]["history"]):
-        lines.append(f"### turn {i} ###\n")
+        lines.append(f"### turn {i + 1} ###\n")
         lines.append(f"  - 사용자:\n{turn['user']}\n\n")
         lines.append(f"  - 법률상담봇:\n{turn['assistant']}\n\n")
     
-    return "".join(lines)
+    return {"status": "ok", "message": "".join(lines)}
 
+# 대화 삭제
+@app.delete("/delete_conversation/{session_id}")
+def delete_conversation(session_id: str):
+    if session_id in session_data:
+        del session_data[session_id]
+        return {"status": "ok", "message": "대화가 삭제되었습니다."}
+    else:
+        return {"status": "error", "message": "해당 세션의 대화가 없습니다."}

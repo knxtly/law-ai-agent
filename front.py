@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import uuid
-import os
 
 # 페이지 설정
 st.set_page_config(page_title="Law AI AGENT", layout="centered")
@@ -25,18 +24,24 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"DB 업데이트 실패: {e}")
     st.divider()
-    st.subheader("대화 다운로드")
+    st.subheader("다운로드")
     if st.button("대화 다운로드"):
         with st.spinner("대화 파일 생성 중..."):
             try:
                 res = requests.get(f"http://127.0.0.1:8000/download_conversation/{st.session_state.session_id}")
                 res.raise_for_status()
-                st.download_button(
-                    label="📥 대화목록 다운로드",
-                    data=res.text,
-                    file_name="conversation.txt",
-                    mime="text/plain"
-                )
+                data = res.json()
+                if data["status"] == "error":
+                    st.error(data["message"])
+                elif data["status"] == "ok":
+                    st.download_button(
+                        label="📥 대화목록 다운로드",
+                        data=data["message"],
+                        file_name=f"conversation_{st.session_state.session_id[:5]}.txt",
+                        mime="text/plain"
+                    )
+                else:
+                    st.error("알 수 없는 응답 형식입니다.")
             except Exception as e:
                 st.error(f"오류 발생: {e}")
 
