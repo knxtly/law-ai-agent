@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
-import os
+import os, uuid
 
 from modules import build_database, query
 from modules.db_manager import db_manager
@@ -24,6 +24,24 @@ session_data = {}  # { session_id: { "conversation_id": str, "history": [ ... ] 
 class UserQuery(BaseModel):
     session_id: str
     query: str
+
+@app.get("/")
+def init_or_restore_session():
+    if len(session_data) == 0:
+        # 아무 세션도 없으면 새로 생성
+        session_id = str(uuid.uuid4())
+        session_data[session_id] = {"conversation_id": None, "history": []}
+        message = "새 세션이 생성되었습니다."
+    else:
+        # 기존 세션 중 첫 번째 사용
+        session_id = list(session_data.keys())[0]
+        message = "기존 세션을 복원했습니다."
+    return {
+        "status": "ok",
+        "message": message,
+        "session_id": session_id,
+        "history": session_data[session_id]["history"]
+    }
 
 # DB 업데이트
 @app.post("/update_db")
@@ -68,11 +86,11 @@ def ask_question(data: UserQuery):
     
     print("context로부터 답변 생성 중...")
     def generate_answer(user_query, context_rag, context_api):
-        max_len = 8000
-        if context_rag and len(context_rag) > max_len:
-            context_rag = context_rag[:max_len] + "..."
-        if context_api and len(context_api) > max_len:
-            context_api = context_api[:max_len] + "..."
+        context_max_len = 8000
+        if context_rag and len(context_rag) > context_max_len:
+            context_rag = context_rag[:context_max_len] + "..."
+        if context_api and len(context_api) > context_max_len:
+            context_api = context_api[:context_max_len] + "..."
         
         # 처음 대화면 conversation 생성
         if session_data[session_id]["conversation_id"] is None:
@@ -81,7 +99,7 @@ def ask_question(data: UserQuery):
                     {
                         "role": "system",
                         "content": """You are a helpful legal assistant bot.
-                        사용자의 질문에 대해 아래 판례 및 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
+                        사용자의 질문에 대해 검색된 판례와 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
                         - 유사한 판례가 없는 경우: "관련 판례를 찾지 못했습니다"라고 말하고 법조문 중심으로 설명하세요.
                         - 가능한 한 법조문이나 판례의 문맥을 유지해서 설명하세요."""
                     }
@@ -89,6 +107,7 @@ def ask_question(data: UserQuery):
             )
             session_data[session_id]["conversation_id"] = conversation.id
 
+        # conversation_id 가져오기
         conversation_id = session_data[session_id]["conversation_id"]
         
         response = openai_client.responses.create(
@@ -129,7 +148,9 @@ def ask_question(data: UserQuery):
 @app.get("/download_conversation/{session_id}")
 def download_conversation(session_id: str):
     if session_id not in session_data:
-        return {"status": "error", "message": "해당 세션의 대화가 없습니다."}
+        return {"status": "error", "message": "해당 세션이 없습니다."}
+    if len(session_data[session_id]["history"]) == 0:
+        return {"status": "error", "message": "대화 내용이 없습니다."}
     
     lines = [f"=== 세션: {session_id} ===\n"]
     for i, turn in enumerate(session_data[session_id]["history"]):
@@ -142,8 +163,14 @@ def download_conversation(session_id: str):
 # 대화 삭제
 @app.delete("/delete_conversation/{session_id}")
 def delete_conversation(session_id: str):
-    if session_id in session_data:
-        del session_data[session_id]
-        return {"status": "ok", "message": "대화가 삭제되었습니다."}
-    else:
-        return {"status": "error", "message": "해당 세션의 대화가 없습니다."}
+    if session_id not in session_data:
+        return {"status": "error", "message": "해당 세션이 없습니다."}
+    
+    conversation_id = session_data[session_id].get("conversation_id")
+    if not conversation_id:
+        return {"status": "error", "message": "대화 내용이 없습니다."}
+    
+    openai_client.conversations.delete(conversation_id)
+    session_data[session_id]["conversation_id"] = None
+    session_data[session_id]["history"] = []
+    return {"status": "ok", "message": "대화 삭제됨"}

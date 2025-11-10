@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import uuid
 
 # 페이지 설정
 st.set_page_config(page_title="Law AI AGENT", layout="centered")
@@ -8,9 +7,10 @@ st.title("Law AI AGENT")
 
 # === 고유 세션 ID 생성 (대화 연결용) ===
 if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-    st.session_state.messages = []  # 초기화
-    st.session_state.initialized = True
+    res = requests.get("http://127.0.0.1:8000/").json()
+    st.session_state.session_id = res["session_id"]
+    st.session_state.messages = res.get("history", [])
+    print(res.get("message", ""))
 
 # === 사이드바: DB 업데이트 ===
 with st.sidebar:
@@ -24,7 +24,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"DB 업데이트 실패: {e}")
     st.divider()
-    st.subheader("다운로드")
+    st.subheader("대화 관리")
     if st.button("대화 다운로드"):
         with st.spinner("대화 파일 생성 중..."):
             try:
@@ -40,6 +40,20 @@ with st.sidebar:
                         file_name=f"conversation_{st.session_state.session_id[:5]}.txt",
                         mime="text/plain"
                     )
+                else:
+                    st.error("알 수 없는 응답 형식입니다.")
+            except Exception as e:
+                st.error(f"오류 발생: {e}")
+    if st.button("대화 삭제"):
+        with st.spinner("대화 삭제 중..."):
+            try:
+                res = requests.delete(f"http://127.0.0.1:8000/delete_conversation/{st.session_state.session_id}")
+                data = res.json()
+                if data["status"] == "error":
+                    st.error(data["message"])
+                elif data["status"] == "ok":
+                    st.session_state.messages = []
+                    st.success(data["message"])
                 else:
                     st.error("알 수 없는 응답 형식입니다.")
             except Exception as e:
