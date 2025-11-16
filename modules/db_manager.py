@@ -13,7 +13,7 @@ class DBManager:
         [1]: preprocess_raw_text
         [2]: rebuild_database
         """
-        preprocess.run(force[0], force[1]) # 데이터 전처리 시작
+        preprocess.preprocess(force[0], force[1]) # 데이터 전처리 시작
         
         self.chromadb_client, self.judgement_collection = \
             build_database.build(force[2]) # 데이터베이스 구성

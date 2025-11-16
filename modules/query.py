@@ -27,10 +27,11 @@ def clarify_query_for_rag(query: str, openai_client):
 "직장에서 부당하게 해고당했어요" → "근로자가 부당해고를 당한 경우의 구제 절차와 법적 판단"
 
 질문: {query}
-답변:
-"""
+답변: """
     response = openai_client.responses.create(
         model="gpt-5-mini",
+        temperature=0,
+        max_tokens=500,
         input=prompt
     )
     return getattr(response, "output_text", "").strip()
@@ -58,6 +59,8 @@ def clarify_query_for_api(query:str, openai_client):
 출력: """
     response = openai_client.responses.create(
         model="gpt-5-mini",
+        temperature=0,
+        max_tokens=500,
         input=prompt
     )
     return getattr(response, "output_text", "").strip()
@@ -78,7 +81,7 @@ def structure_results_rag(result):
     return structured
 
 # 관련판례 검색 결과 -> json
-def structure_results_api(precs):
+def structure_results_api(precs, openai_client):
     """
     https://www.law.go.kr/DRF/lawService.do?OC=knxtly1596&target=prec&ID=228531&type=JSON
     """
@@ -96,7 +99,13 @@ def structure_results_api(precs):
         {prec_detail.get("판결요지", "").strip() or ""}
         """.strip()
         
-        # TODO: 판시사항과 판결요지 둘 다 없을 때 판결내용?
+        # TODO: 판시사항과 판결요지 둘 다 없을 때 판결내용 저장정책
+        if len(content) == 0:
+            openai_client.responses.create(
+                model="gpt-5-mini",
+                input=f"판시사항과 판결요지가 없는 판례가 있습니다. 판례번호: {prec_detail.get('사건번호', '')}. 판결내용을 요약해서 판시사항과 판결요지로 대체하세요. 판결내용: {prec_detail.get('판결내용', '').strip()}"
+            )
+            content += prec_detail.get("판결내용", "").strip()
 
         # 너무 길면 잘라내기
         max_len = 8000
@@ -166,21 +175,28 @@ def search_query(openai_client, judgement_collection, user_query, use_rag, clari
     
     prec_list = requests.get(BASE_URL + "/DRF/lawSearch.do", params=params).json()\
         .get("PrecSearch", {}).get("prec")
+    
+    # prec_list는 항상 리스트
     if not prec_list:
         prec_list = []
-
     if isinstance(prec_list, dict):
-        prec_list = [prec_list]  # prec_list는 항상 리스트
+        prec_list = [prec_list]
     
     precs = []
     for item in prec_list:
         prec_detail = requests.get(BASE_URL + item["판례상세링크"].replace("HTML", "JSON")).json()
         precs.append(prec_detail)
+    # TODO: 판례본문조회한 내용 임베딩을 통해 유사도계산하고 내림차순정렬해보기
+    # 오늘 할 것
+    # ChromaDB에 저장 후 유사도거리 기반 쿼리 구현
+    
+    
+    
     # 구조화
     context_api = {
         "query": user_query,
         "expanded_query": clarified_query_for_api,
-        "results": structure_results_api(precs)
+        "results": structure_results_api(precs, openai_client)
     }
 
     # context 전체 저장

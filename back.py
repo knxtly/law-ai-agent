@@ -18,7 +18,17 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 chromadb_client, judgement_collection = build_database.build(False)
 
 # 세션별 대화 히스토리 및 conversation_id 저장
-session_data = {}  # { session_id: { "conversation_id": str, "history": [ ... ] } }
+session_data = {} 
+# session_data = {
+#     session_id: {
+#         "conversations": {
+#             "conv1": {"history": [...], "title": "대화 제목"},
+#             "conv2": {"history": [...], "title": "다른 대화"},
+#         },
+#         "active_conversation_id": "conv1"
+#     }
+# }
+
 
 # POST 요청 데이터 모델
 class UserQuery(BaseModel):
@@ -31,15 +41,16 @@ def init_or_restore_session():
         # 아무 세션도 없으면 새로 생성
         session_id = str(uuid.uuid4())
         session_data[session_id] = {"conversation_id": None, "history": []}
-        message = "새 세션이 생성되었습니다."
+        message = f"새 세션이 생성되었습니다: {session_id}"
     else:
         # 기존 세션 중 첫 번째 사용
         session_id = list(session_data.keys())[0]
-        message = "기존 세션을 복원했습니다."
+        message = f"기존 세션을 복원했습니다: {session_id}"
     return {
         "status": "ok",
         "message": message,
         "session_id": session_id,
+        "conversation_id": session_data[session_id]["conversation_id"],
         "history": session_data[session_id]["history"]
     }
 
@@ -51,9 +62,9 @@ def update_database():
 
 # 사용자 쿼리를 가지고 관련 판례 검색
 @app.post("/ask")
-def ask_question(data: UserQuery):
-    user_query = data.query
-    session_id = data.session_id
+def ask_question(userInput: UserQuery):
+    user_query = userInput.query
+    session_id = userInput.session_id
     
     print(f"[{session_id}] 유저 질문: {user_query}")
     
@@ -98,10 +109,10 @@ def ask_question(data: UserQuery):
                 items=[
                     {
                         "role": "system",
-                        "content": """You are a helpful legal assistant bot.
-                        사용자의 질문에 대해 검색된 판례와 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
-                        - 유사한 판례가 없는 경우: "관련 판례를 찾지 못했습니다"라고 말하고 법조문 중심으로 설명하세요.
-                        - 가능한 한 법조문이나 판례의 문맥을 유지해서 설명하세요."""
+                        "content": """당신은 법률 상담 전문가입니다.
+사용자의 질문에 대해 검색된 판례와 법령을 근거로 구체적이고 신뢰성 있게 답변하세요.
+- 유사한 판례가 없는 경우: "관련 판례를 찾지 못했습니다"라고 말하고 법조문 중심으로 설명하세요.
+- 가능한 한 법조문이나 판례의 문맥을 유지해서 설명하세요."""
                     }
                 ]
             )
@@ -145,29 +156,28 @@ def ask_question(data: UserQuery):
     }
 
 # 다운로드 요청 시 파일 생성
-@app.get("/download_conversation/{session_id}")
-def download_conversation(session_id: str):
+@app.get("/download_conversation")
+def download_conversation(session_id: str, conversation_id: str):
     if session_id not in session_data:
         return {"status": "error", "message": "해당 세션이 없습니다."}
     if len(session_data[session_id]["history"]) == 0:
         return {"status": "error", "message": "대화 내용이 없습니다."}
     
-    lines = [f"=== 세션: {session_id} ===\n"]
+    lines = [f"=== 세션: {session_id} ===\n", f"=== 대화 ID: {conversation_id} ===\n\n"]
     for i, turn in enumerate(session_data[session_id]["history"]):
         lines.append(f"### turn {i + 1} ###\n")
-        lines.append(f"  - 사용자:\n{turn['user']}\n\n")
-        lines.append(f"  - 법률상담봇:\n{turn['assistant']}\n\n")
+        lines.append(f"  - 사용자:\n{turn["user"]}\n\n")
+        lines.append(f"  - 법률상담봇:\n{turn["assistant"]}\n\n")
     
     return {"status": "ok", "message": "".join(lines)}
 
 # 대화 삭제
-@app.delete("/delete_conversation/{session_id}")
-def delete_conversation(session_id: str):
+@app.delete("/delete_conversation")
+def delete_conversation(session_id: str, conversation_id: str):
     if session_id not in session_data:
         return {"status": "error", "message": "해당 세션이 없습니다."}
     
-    conversation_id = session_data[session_id].get("conversation_id")
-    if not conversation_id:
+    if not conversation_id or not session_data[session_id].get("conversation_id"):
         return {"status": "error", "message": "대화 내용이 없습니다."}
     
     openai_client.conversations.delete(conversation_id)

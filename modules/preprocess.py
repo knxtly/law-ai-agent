@@ -99,7 +99,7 @@ def preprocess_raw_text(law_types: list[str], n_of_jud: list[int],
             print(f"  [Warning] {law} 전처리 과정 중, 청크개수={len(chunks)} / 판례개수={n_of_jud[law_types.index(law)]} -> 불일치")
 
 
-def run(force_convert_pdf_to_txt=False, force_preprocess_raw_text=False):
+def preprocess(force_convert_pdf_to_txt=False, force_preprocess_raw_text=False):
     """
     force
     [0]: convert_pdf_to_txt
@@ -116,4 +116,4 @@ def run(force_convert_pdf_to_txt=False, force_preprocess_raw_text=False):
                             raw_texts_path, preprocessed_text_path)
 
 if __name__=="__main__":
-    run(True, True)
+    preprocess(True, True)

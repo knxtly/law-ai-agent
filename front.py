@@ -9,12 +9,14 @@ st.title("Law AI AGENT")
 if "session_id" not in st.session_state:
     res = requests.get("http://127.0.0.1:8000/").json()
     st.session_state.session_id = res["session_id"]
-    st.session_state.messages = res.get("history", [])
+    st.session_state.conversation_id = res["conversation_id"]
+    st.session_state.history = res.get("history", [])
     print(res.get("message", ""))
 
-# === 사이드바: DB 업데이트 ===
+# === 사이드바 ===
 with st.sidebar:
     st.subheader("⚙ 시스템 관리")
+    # if st.button("전처리"):
     if st.button("DB 업데이트"):
         with st.spinner("DB 갱신 중..."):
             try:
@@ -28,7 +30,13 @@ with st.sidebar:
     if st.button("대화 다운로드"):
         with st.spinner("대화 파일 생성 중..."):
             try:
-                res = requests.get(f"http://127.0.0.1:8000/download_conversation/{st.session_state.session_id}")
+                res = requests.get(
+                    "http://127.0.0.1:8000/download_conversation",
+                    params={
+                        "session_id": st.session_state.session_id,
+                        "conversation_id": st.session_state.conversation_id
+                    }
+                )
                 res.raise_for_status()
                 data = res.json()
                 if data["status"] == "error":
@@ -47,31 +55,34 @@ with st.sidebar:
     if st.button("대화 삭제"):
         with st.spinner("대화 삭제 중..."):
             try:
-                res = requests.delete(f"http://127.0.0.1:8000/delete_conversation/{st.session_state.session_id}")
+                res = requests.delete(f"http://127.0.0.1:8000/delete_conversation", params={
+                    "session_id": st.session_state.session_id,
+                    "conversation_id": st.session_state.conversation_id
+                })
                 data = res.json()
                 if data["status"] == "error":
                     st.error(data["message"])
                 elif data["status"] == "ok":
-                    st.session_state.messages = []
+                    st.session_state.history = []
                     st.success(data["message"])
                 else:
                     st.error("알 수 없는 응답 형식입니다.")
             except Exception as e:
                 st.error(f"오류 발생: {e}")
 
-
-st.caption(f"Session ID: `{st.session_state.session_id}`")  # 디버깅용 표시
+# === 세션 및 대화 ID 표시 ===
+st.caption(f"Session ID: `{st.session_state.session_id}`, Conversation ID: `{st.session_state.conversation_id}`")
 st.divider()
 
 # === 기존 대화 출력 ===
-for msg in st.session_state.messages:
+for msg in st.session_state.history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 # === 사용자 입력 ===
 if user_query := st.chat_input("법률 관련 질문을 입력하세요."):
     # 사용자 입력 표시 및 기록
-    st.session_state.messages.append({"role": "user", "content": user_query})
+    st.session_state.history.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
         st.markdown(user_query)
 
@@ -93,4 +104,4 @@ if user_query := st.chat_input("법률 관련 질문을 입력하세요."):
                 answer = f"⚠ 오류 발생: {e}"
 
             st.markdown(answer)
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+            st.session_state.history.append({"role": "assistant", "content": answer})
