@@ -1,7 +1,10 @@
+import json
 from fastapi import FastAPI
 from fastapi import Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from enum import Enum
+from typing import List, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 import os, uuid
@@ -86,26 +89,94 @@ def ask_question(userInput: UserQuery):
     if session_id not in session_data:
         return {"status": "error", "message": "세션이 없습니다."}
     
-    print(f"[{session_id} / {conv_id}] 유저 질문: {user_query}")
+    print(f"[Sess:{session_id[:5]}... / Conv:{conv_id[5:10]}...] 유저 질문: {user_query}")
     
-    # TODO: 이 부분에 첫 번째 모델의 답변 생성
-    # answer = openai_client.responses.create(
-    #     model="gpt-5-mini",
-    #     conversation=conv_id,
-    #     prompt=user_query,
-    # )
-    answer = "질문을 받았습니다."
+    # [Chat Model]의 Output Schema
+    class ChatStatusEnum(str, Enum):
+        CONTINUE = "CONTINUE"
+        DONE = "DONE"
+    class ChatSchema(BaseModel):
+        status: ChatStatusEnum
+        message: str
+        class Config:
+            extra = "forbid"
 
-    print("대화 저장 중...")
-    session_data[session_id]["conversations"][conv_id]["history"].append(
-        {"role": "user", "content": user_query})
-    session_data[session_id]["conversations"][conv_id]["history"].append(
-        {"role": "assistant", "content": answer})
-    
-    return {
-        "status": "ok",
-        "answer": answer
-    }
+    # [Extract Model]의 Output Schema
+    class Parties(BaseModel):
+        sender: Optional[str] = None
+        receiver: Optional[str] = None
+        relationship: Optional[str] = None
+        class Config:
+            extra = "forbid"
+    class ExtractSchema(BaseModel):
+        parties: Parties
+        action: Optional[str] = None
+        result_or_damage: Optional[str] = None
+        legal_issue: Optional[str] = None
+        legal_domain: Optional[str] = None
+        user_intent: Optional[str] = None
+        class Config:
+            extra = "forbid"
+        
+    # [Query Model]의 Output JSON
+    # ...(TODO)
+    class MissingFieldsEnum(str, Enum):
+        PARTIES = "parties"
+        ACTION = "action"
+        RESULT_OR_DAMAGE = "result_or_damage"
+        LEGAL_ISSUE = "legal_issue"
+        LEGAL_DOMAIN = "legal_domain"
+        USER_INTENT = "user_intent"
+    # [Answer Model]의 Output JSON
+    # ...(TODO)
+
+    while True:
+        # [Chat Model]의 답변 생성
+        print(f"[Chat Model] \t-> 답변 생성 중...")
+        response = openai_client.responses.parse(
+            model="gpt-5-mini",
+            conversation=conv_id,
+            input=user_query,
+            text_format=ChatSchema
+        )
+        
+        # output_parsed가 json형태라서 "status"와 "message"로 나누기
+        chat_model_status = response.output_parsed.status
+        chat_model_msg = response.output_parsed.message
+        
+        if chat_model_status == "CONTINUE":
+            print(f"[Chat Model] CONTINUE\t-> 대화 저장 중... ({chat_model_msg[:30]}...)")
+            session_data[session_id]["conversations"][conv_id]["history"].append({"role": "user", "content": user_query})
+            session_data[session_id]["conversations"][conv_id]["history"].append({"role": "assistant", "content": chat_model_msg})
+            return {"status": "ok", "answer": chat_model_msg}
+
+        # elif chat_model_status == "DONE":
+        # [Extract Model] 호출
+        print(f"[Chat Model] DONE\t-> Extract Model 호출... ({chat_model_msg}...)")
+        with open("./prompts/1.extract_model_system_prompt.txt", "r", encoding="utf-8") as f:
+            system_prompt = f.read()
+
+        history = session_data[session_id]["conversations"][conv_id]["history"]
+        response = openai_client.responses.parse(
+            model="gpt-5-mini",
+            input=[
+                {"role": "system", "content": system_prompt},
+                *history,
+                {"role": "user", "content": user_query} # 임시로 최신 발화 포함
+            ],
+            text_format=ExtractSchema
+        )
+        extract_model_output = response.output_parsed
+        
+        try:
+            print(f"[Extract Model]\t-> 대화에서 정보 추출됨: {json.dumps(json.loads(extract_model_output), ensure_ascii=False, indent=2)}")
+        except:
+            print("[Extract Model]\t-> 대화에서 정보 추출됨 (raw):", extract_model_output)
+        return {"status": "ok", "answer": extract_model_output}
+        # TODO: [Query Model] 호출
+        print(f"[Extract Model] COMPLETE\t-> Query Model 호출... ({extract_model_output[:100]}...)")
+
+    return {"status": "ok", "answer": answer}
 
 # 다운로드 요청 시 파일 생성
 @app.get("/download_conversation")
@@ -121,7 +192,7 @@ def download_conversation(session_id: str, conversation_id: str):
     if len(history) == 0:
         return {"status": "error", "message": f"\"{title}\"의 대화 내용이 없습니다."}
     
-    lines = [f"=== 세션: {session_id}, 대화 ID: {conversation_id} ===\n\n"]
+    lines = [f"=== 세션: {session_id[:5]}..., 대화 ID: {conversation_id[:10]}... ===\n\n"]
     for i, turn in enumerate(history):
         role = "사용자" if turn["role"] == "user" else "법률상담봇"
         lines.append(f"  - [{role}]:\n{turn['content']}\n\n")
