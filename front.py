@@ -8,14 +8,14 @@ st.title("Law AI AGENT")
 # === 고유 세션 ID 생성 (대화 연결용) ===
 if "session_id" not in st.session_state:
     res = requests.get("http://127.0.0.1:8000/").json()
-    # session_id, active_conv_id, history, title
+    # session_id, active_conv_id, title
     st.session_state.session_id = res["session_id"]
     st.session_state.active_conv_id = res.get("active_conv_id", None)
-    st.session_state.active_conv_title = res.get("title", "")
+    st.session_state.active_conv_title = res.get("title", None)
 
 # === 사이드바 ===
 with st.sidebar:
-    # === 대화 목록 가져오기 ===
+    # === 대화 목록 가져오기 === TODO: "role"이 "system"인 건 보여주지 않음
     try:
         res = requests.get(
             "http://127.0.0.1:8000/get_conversations",
@@ -24,7 +24,7 @@ with st.sidebar:
         data = res.json()
 
         if data["status"] == "ok":
-            conv_list = data["conversations"]
+            conv_list = data["conversations"] # conversation_id, title, is_active
         else:
             st.error(data["message"])
             conv_list = []
@@ -49,7 +49,7 @@ with st.sidebar:
                     st.error(data["message"])
                 else:
                     st.success(f"새 대화 생성됨: {data['title']}")
-                    st.session_state.active_conv_id = data["conversation_id"]
+                    st.session_state.active_conv_id = data["new_conv_id"]
                     st.rerun()
 
             except Exception as e:
@@ -61,7 +61,7 @@ with st.sidebar:
     if st.button("대화 다운로드"):
         with st.spinner("대화 파일 생성 중..."):
             if st.session_state.active_conv_id is None:
-                st.error("대화가 없습니다.")
+                st.error("선택된 대화가 없습니다.")
             else:
                 try:
                     res = requests.get(
@@ -72,13 +72,16 @@ with st.sidebar:
                         }
                     )
                     res.raise_for_status()
-                    file_bytes = res.text
-                    st.download_button(
-                        label="파일 생성 완료. 다운로드하려면 누르세요",
-                        data=file_bytes,
-                        file_name=f"conversation_{st.session_state.active_conv_id[6:6+5]}.txt",
-                        mime="text/plain"
-                    )
+                    data = res.json()
+                    if data.get("status", "") == "error":
+                        st.error(data["message"])
+                    else:
+                        st.download_button(
+                            label="다운로드하려면 누르세요",
+                            data=data["file"],
+                            file_name=f"conversation_{st.session_state.active_conv_id[6:6+5]}.txt",
+                            mime="text/plain"
+                        )
                 except Exception as e:
                     st.error(f"오류 발생: {e}")
 
@@ -105,7 +108,6 @@ with st.sidebar:
                     else:
                         st.success(data["message"])
                         st.session_state.active_conv_id = data["active_conv_id"]
-                        st.session_state.active_conv_title = ""
                         st.rerun()
 
                 except Exception as e:
@@ -167,6 +169,7 @@ if st.session_state.active_conv_id:
     history = conv_detail.get("history", [])
     st.session_state.active_conv_title = conv_detail.get("title", "")
 else:
+    st.session_state.active_conv_title = ""
     history = []
 
 # === 세션ID, 대화ID 표시, 대화출력 ===
