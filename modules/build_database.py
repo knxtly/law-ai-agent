@@ -140,7 +140,6 @@ def build(force: bool, do_parse: bool=True):
     return client, judgement_collection
 
 if __name__ == "__main__":
-    # TODO: chunking 정책 비교
     import query
 
     print(" [[[ test start ]]]")

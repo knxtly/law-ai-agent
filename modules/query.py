@@ -9,6 +9,8 @@ import requests
 
 from modules.config import TOP_N
 
+MODEL_NAME = "gpt-5-mini"
+
 # 사용자 질문 의미적 명료화
 def clarify_query_for_rag(query: str, openai_client):
     prompt = f"""당신은 사용자의 질문을 법률 판례 검색에 적합하도록 의미적으로 명료화하는 역할을 맡고 있습니다.
@@ -29,12 +31,10 @@ def clarify_query_for_rag(query: str, openai_client):
 질문: {query}
 답변: """
     response = openai_client.responses.create(
-        model="gpt-5-mini",
-        temperature=0,
-        max_tokens=500,
+        model=MODEL_NAME,
         input=prompt
     )
-    return getattr(response, "output_text", "").strip()
+    return response.output_text
 
 # 사용자 질문 키워드적 명료화
 def clarify_query_for_api(query:str, openai_client):
@@ -58,12 +58,11 @@ def clarify_query_for_api(query:str, openai_client):
 입력: {query}
 출력: """
     response = openai_client.responses.create(
-        model="gpt-5-mini",
-        temperature=0,
-        max_tokens=500,
+        model=MODEL_NAME,
+        max_output_tokens=500,
         input=prompt
     )
-    return getattr(response, "output_text", "").strip()
+    return response.output_text
 
 
 # 관련판례 검색 결과 -> json
@@ -99,13 +98,14 @@ def structure_results_api(precs, openai_client):
         {prec_detail.get("판결요지", "").strip() or ""}
         """.strip()
         
-        # TODO: 판시사항과 판결요지 둘 다 없을 때 판결내용 저장정책
-        if len(content) == 0:
-            openai_client.responses.create(
-                model="gpt-5-mini",
-                input=f"판시사항과 판결요지가 없는 판례가 있습니다. 판례번호: {prec_detail.get('사건번호', '')}. 판결내용을 요약해서 판시사항과 판결요지로 대체하세요. 판결내용: {prec_detail.get('판결내용', '').strip()}"
-            )
-            content += prec_detail.get("판결내용", "").strip()
+        # 판시사항과 판결요지 둘 다 없을 때 판결내용 저장정책
+        content += prec_detail.get("판결내용", "").strip()
+        # if len(content) < 50:
+        #     response = openai_client.responses.create(
+        #         model=MODEL_NAME,
+        #         input=f"판시사항과 판결요지가 없는 판례가 있습니다. 판례번호: {prec_detail.get('사건번호', '')}.\n판결내용을 요약해서 판시사항과 판결요지로 대체하세요.\n판결내용:\n{prec_detail.get('판결내용', '').strip()}"
+        #     )
+        #     content = response.output_text        
 
         # 너무 길면 잘라내기
         max_len = 8000
@@ -187,9 +187,37 @@ def search_query(openai_client, judgement_collection, user_query, use_rag, clari
         prec_detail = requests.get(BASE_URL + item["판례상세링크"].replace("HTML", "JSON")).json()
         precs.append(prec_detail)
     # TODO: 판례본문조회한 내용 임베딩을 통해 유사도계산하고 내림차순정렬해보기
-    # 오늘 할 것
     # ChromaDB에 저장 후 유사도거리 기반 쿼리 구현
     
+    # ids = []
+    # metadatas = []
+    # documents = []
+    # # chromaDB 임베딩 준비
+    # ids.append(f"api_{prec_detail.get('사건번호', '')}")
+    # metadatas.append({
+    #     "법령종류": prec_detail.get("사건종류명", ""),
+    #     "제목": prec_detail.get("사건명", ""),
+    #     "판례번호": "({} {} {} {} {})".format(
+    #         prec_detail.get("법원명", ""),
+    #         prec_detail.get("선고일자", ""),
+    #         prec_detail.get("선고", ""),
+    #         prec_detail.get("사건번호", ""),
+    #         prec_detail.get("판결유형", "")
+    #     ),
+    # })
+    # documents.append(content)
+    # chromadb_client = chromadb.Client()
+    # collection = chromadb_client.get_or_create_collection(
+    #     name="api_collection",
+    #     embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
+    #             model_name="jhgan/ko-sroberta-multitask"
+    #     )
+    # )
+    # collection.add(
+    #     documents=documents,
+    #     metadatas=metadatas,
+    #     ids=ids
+    # )
     
     
     # 구조화
@@ -207,7 +235,6 @@ def search_query(openai_client, judgement_collection, user_query, use_rag, clari
     return context_rag, context_api
 
 if __name__ == "__main__":
-    # TODO: 질의 명료화 모델 ON/OFF비교
     import chromadb
     import chromadb.utils.embedding_functions as embedding_functions
     
