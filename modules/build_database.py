@@ -5,7 +5,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import chromadb
-from chromadb.utils import embedding_functions
+import chromadb.utils.embedding_functions as ef
 import re
 
 from modules.config import n_of_jud, law_types
@@ -82,7 +82,7 @@ def add_to_collection(law, chunks, collection, do_parse=True):
                 continue
             docs.append(parsed["내용"])
             metas.append({
-                "law_type": law,
+                "법령종류": law,
                 "제목": parsed["제목"],
                 "판례번호": parsed["판례번호"],
                 "선정이유": parsed["선정이유"]
@@ -91,7 +91,7 @@ def add_to_collection(law, chunks, collection, do_parse=True):
     else:
         for i, chunk in enumerate(chunks):
             docs.append(chunk)
-            metas.append({"law_type": law})
+            metas.append({"법령종류": law})
             ids.append(f"{law}_{i + 1}")
     if docs:
         collection.add(documents=docs, metadatas=metas, ids=ids)
@@ -99,56 +99,29 @@ def add_to_collection(law, chunks, collection, do_parse=True):
 
 
 # === 데이터베이스 처음부터 구성 ===
-def rebuild_db(judgement_collection, law_types, do_parse):
-    # 데이터 삭제
-    for law in law_types:
-        judgement_collection.delete(where={"law_type":law})
+def restart_db(col_name: str, embedding_function, db_path):
+    db_client = chromadb.PersistentClient(path=db_path) # 영구 저장 클라이언트
+    try:
+        print(" [build_database.py] 모든 컬렉션 삭제")
+        for c in db_client.list_collections():
+            db_client.delete_collection(c.name)
+    except:
+        pass
+    jdmt_col = db_client.create_collection(
+        name=col_name,
+        embedding_function=embedding_function
+    )
     
     # 판례 다시 추가
     for i, law in enumerate(law_types):
         with open(f"./data/preprocessed_texts/{law}_판례_prep.txt", "r", encoding="utf-8") as f:
             chunks = re.split(r"#### Chunk \d+\n", f.read())[1:]
         if len(chunks) != n_of_jud[i]:
-            print(f" [Warning] {law}: 전처리 중 chunk 개수와 판례개수가 맞지 않음: {chunks} / {n_of_jud[i]}")
+            print(f" [build_database.py] {law}: 전처리 중 chunk 개수와 판례개수가 맞지 않음: {chunks} / {n_of_jud[i]}")
         
-        num_of_added_judgement = add_to_collection(law, chunks, judgement_collection, do_parse)
-        print(f"{law}: {num_of_added_judgement} / {len(chunks)} saved.")
-    
+        jdmt_cnt = add_to_collection(law, chunks, jdmt_col)
+        print(f" [build_database.py] {law}: {jdmt_cnt} / {len(chunks)} saved.")
 
-def build(force: bool, do_parse: bool=True):
-    """
-    force:
-    init_db?
-    """
-    # === ChromaDB Client & Collection 생성 ===
-    client = chromadb.PersistentClient(path="./data/chroma_db") # 영구 저장 클라이언트
-    judgement_collection = client.get_or_create_collection(
-        name="judgement_collection",
-        embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="jhgan/ko-sroberta-multitask"
-            # TODO: Jina Embedding 사용해보기
-            # model_name="jina-embeddings-v3", # intfloat/multilingual-e5-small
-            # api_key=JINA_API_KEY,
-            # late_chunking=True,
-            # task="retrieval.passage"
-        )
-    )
-    
-    if force:
-        rebuild_db(judgement_collection, law_types, do_parse)
-    
-    return client, judgement_collection
 
 if __name__ == "__main__":
-    import query
-
-    print(" [[[ test start ]]]")
-    client, judgement_collection = build(force=False, do_parse=False)
-    user_query = "아파트 보증금을 못 돌려받으면 어떻게 해야 하나요?"
-    
-    from openai import OpenAI
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    query.search_query(openai_client, judgement_collection, user_query, use_rag=True, clarify_q=True)
-    print(" [[[ test complete ]]]")
+    pass

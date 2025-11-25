@@ -99,7 +99,7 @@ def preprocess_raw_text(law_types: list[str], n_of_jud: list[int],
             print(f"  [Warning] {law} 전처리 과정 중, 청크개수={len(chunks)} / 판례개수={n_of_jud[law_types.index(law)]} -> 불일치")
 
 
-def preprocess(force_convert_pdf_to_txt=False, force_preprocess_raw_text=False):
+def preprocess(convert_pdf2txt=False, preprocess_text=False):
     """
     force
     [0]: convert_pdf_to_txt
@@ -108,10 +108,10 @@ def preprocess(force_convert_pdf_to_txt=False, force_preprocess_raw_text=False):
     judgements_path = "./data/source_data/judgements"
     raw_texts_path = "./data/raw_texts"
     preprocessed_text_path = "./data/preprocessed_texts"
-    if force_convert_pdf_to_txt:
+    if convert_pdf2txt:
         convert_pdf_to_txt(config.law_types, config.jud_start_page, config.jud_end_page,
                            judgements_path, raw_texts_path)
-    if force_preprocess_raw_text:
+    if preprocess_text:
         preprocess_raw_text(config.law_types, config.n_of_jud,
                             raw_texts_path, preprocessed_text_path)
 

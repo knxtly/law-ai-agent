@@ -15,7 +15,7 @@ if "session_id" not in st.session_state:
 
 # === 사이드바 ===
 with st.sidebar:
-    # === 대화 목록 가져오기 === TODO: "role"이 "system"인 건 보여주지 않음
+    # === 대화 목록 가져오기 ===
     try:
         res = requests.get(
             "http://127.0.0.1:8000/get_conversations",
@@ -182,6 +182,8 @@ st.caption(
 st.divider()
 
 for msg in history:
+    if msg["role"] == "system":
+        continue
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 

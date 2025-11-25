@@ -1,23 +1,24 @@
 import modules.build_database as build_database
 import modules.preprocess as preprocess
+import chromadb.utils.embedding_functions as ef
 
 class DBManager:
-    def __init__(self):
-        self.chromadb_client = None
-        self.judgement_collection = None
+    def __init__(
+        self,
+        db_path="./data/chroma_db",
+        jdmt_col_name="rag_prec_collection"
+    ):
+        self.db_path = db_path
+        self.ef = ef.SentenceTransformerEmbeddingFunction(
+            model_name="jhgan/ko-sroberta-multitask"
+        )
+        self.col_name = jdmt_col_name
 
-    def init_db(self, force=[False, False, False]):
-        """
-        force
-        [0]: convert_pdf_to_txt
-        [1]: preprocess_raw_text
-        [2]: rebuild_database
-        """
-        preprocess.preprocess(force[0], force[1]) # 데이터 전처리 시작
-        
-        self.chromadb_client, self.judgement_collection = \
-            build_database.build(force[2]) # 데이터베이스 구성
-        
-        return self.judgement_collection
+    def init_db(self, convert_pdf2txt=False, preprocess_text=False, rebuild_db=False):
+        # 데이터 전처리
+        preprocess.preprocess(convert_pdf2txt, preprocess_text)
+        # DB 구성
+        if rebuild_db:
+            build_database.restart_db(self.col_name, self.ef, self.db_path)
 
 db_manager = DBManager()

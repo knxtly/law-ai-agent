@@ -1,6 +1,5 @@
 import json
 from fastapi import FastAPI
-from fastapi import Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from enum import Enum
@@ -9,7 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import os, uuid
 
-from modules import build_database, query
+from modules import query
 from modules.db_manager import db_manager
 
 app = FastAPI()
@@ -21,7 +20,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL_NAME = "gpt-5-mini"
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-chromadb_client, judgement_collection = build_database.build(False)
 
 # System prompts
 with open("./prompts/0.chat_model_system_prompt.txt", "r", encoding="utf-8") as f:
@@ -30,6 +28,8 @@ with open("./prompts/1.extract_model_system_prompt.txt", "r", encoding="utf-8") 
     extract_syst_prompt = f.read()
 with open("./prompts/2.query_model_system_prompt.txt", "r", encoding="utf-8") as f:
     query_syst_prompt = f.read()
+with open("./prompts/3.answer_model_system_prompt.txt", "r", encoding="utf-8") as f:
+    answer_syst_prompt = f.read()
 
 # 세션 안의 대화들(conv_id들 + history) 및 현재 active 대화id
 session_data = {}
@@ -86,7 +86,7 @@ def init_or_restore_session():
 # DB 업데이트
 @app.post("/update_db")
 def update_database():
-    db_manager.init_db([False, False, True])
+    db_manager.init_db(False, False, True)
     return {"message": "DB 업데이트 완료"}
 
 # 사용자 쿼리를 가지고 관련 판례 검색
@@ -154,7 +154,7 @@ def ask_question(userInput: UserQuery):
             extra = "forbid"
     
     # [Answer Model]의 Output JSON
-    # ...(TODO)
+    # (text만 생성)
 
     print("[FastAPI]\tuser_query를 history에 넣는 중...")
     session_data[session_id]["conversations"][conv_id]["history"].append({"role": "user", "content": user_query})
@@ -179,13 +179,13 @@ def ask_question(userInput: UserQuery):
     print(f"[Chat Model] {chat_status}\t->", end=" ")
     
     if chat_status == "CONTINUE":
-        print(f"답변 저장 중... [{chat_msg[:30]}...]")
+        print(f"답변: [{chat_msg[:20]}...]")
         session_data[session_id]["conversations"][conv_id]["history"].append({"role": "assistant", "content": chat_msg})
         return {"status": "ok", "answer": chat_msg}
 
 
     # [Extract Model] 호출
-    print(f"Extract Model 호출... [디버깅(아무것도 없는 게 좋음): {chat_msg}...]")
+    print(f"Extract Model 호출... [디버깅(No text): {chat_msg}...]")
     extract_response = openai_client.responses.parse(
         model=MODEL_NAME,
         input=[
@@ -219,29 +219,63 @@ def ask_question(userInput: UserQuery):
     query_status = query_output.status
     print(f"[Query Model] {query_status}\t->", end=" ")
     if query_status == "sufficient" or query_status == "warning":
-        m = query_output.query_for_meaning
-        k = query_output.query_for_keyword
-        print("Query 생성 완료")
-        print(f" - [Query Model] query for meaning\t-> {m}")
-        print(f" - [Query Model] query for keyword\t-> {k}")
-        # RAG 검색
-        # API 검색
-        # build_context
-        # answer = [Answer Model] 호출
-        answer = "[Answer Model]의 답변 결과가 담겨있을 채팅입니다."
+        query_for_rag = query_output.query_for_meaning
+        query_for_api = query_output.query_for_keyword
+        print(
+            "Query 생성 완료\n"
+            f" - [Query Model] query for meaning\t-> {query_for_rag}\n"
+            f" - [Query Model] query for keyword\t-> {query_for_api}\n"
+        )
+        
+        # RAG, API 검색 (상위 TOP_N개)
+        context_rag, context_api = query.search_query(
+            db_manager.ef, query_for_rag, query_for_api, 5
+        )
+
+        # context 합치기
+        context_sum = (
+            "# [Extract Model 결과]\n"
+            f"{extract_output.model_dump_json()}\n\n"
+            "# [RAG 기반 판례 검색 결과]\n"
+            f"{context_rag}\n\n"
+            "# [공동활용 API 판례 검색 결과]\n"
+            f"{context_api}"
+        )
+
+        # [Answer Model] 입력 생성
+        answer_model_input = (
+            "아래는 Extract Model이 구조화한 사건 정보와 판례 검색 결과입니다.\n"
+            "이를 기반으로 사용자의 상황과 연결해 법률적으로 판단하고 설명하세요.\n\n"
+            f"{context_sum}"
+        )
+
+        # [Answer Model] 호출 ===
+        answer_response = openai_client.responses.create(
+            model=MODEL_NAME,
+            input=[
+                {"role": "system", "content": answer_syst_prompt},
+                {"role": "user", "content": answer_model_input}
+            ]
+        )
+
+        answer = answer_response.output_text
+        session_data[session_id]["conversations"][conv_id]["history"].append(
+            {"role": "assistant", "content": answer}
+        )
         return {"status": "ok", "answer": answer}
     
     # Query Model의 feedback을 history에 포함
     insufficient = ", ".join([field.value for field in query_output.insufficient_field or []])
-    feedback_msg = f"판례 검색을 위한 쿼리를 생성하는 데 다음 정보가 필요합니다: {insufficient}."
+    feedback_msg = f"판례 검색을 위한 쿼리를 생성하는 데 다음 정보가 필요합니다: {insufficient}.\n"
     feedback_msg += f"Query Model의 feedback message: {query_output.feedback_to_chat}"
     print("Feedback 생성됨")
     print(f" - [Query Model] missing\t-> {insufficient}")
     print(f" - [Query Model] feedback_msg\t-> {feedback_msg}")
     
     print(f"[Query Model] feedback을 history에 저장 중...")
-    session_data[session_id]["conversations"][conv_id]["history"].append({
-        "role": "system", "content": feedback_msg})
+    session_data[session_id]["conversations"][conv_id]["history"].append(
+        {"role": "system", "content": feedback_msg}
+    )
 
 
     # [Chat Model] 호출
@@ -260,7 +294,7 @@ def ask_question(userInput: UserQuery):
     # output_parsed(Pydantic형태)
     chat_status = chat_response.output_parsed.status
     chat_msg = chat_response.output_parsed.message
-    print(f"[Chat Model] {chat_status}\t-> 답변 저장 중... [{chat_msg[:30]}...]")
+    print(f"[Chat Model] {chat_status}\t-> 답변 저장 중... [{chat_msg[:20]}...]")
     session_data[session_id]["conversations"][conv_id]["history"].append({
         "role": "assistant", "content": chat_msg})
     return {"status": "ok", "answer": chat_msg}
