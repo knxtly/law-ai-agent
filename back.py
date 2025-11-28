@@ -21,7 +21,63 @@ MODEL_NAME = "gpt-5-mini"
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# System prompts
+# === Schemas ===
+# [Chat Model]의 Output Schema
+class ChatStatusEnum(str, Enum):
+    CONTINUE = "CONTINUE"
+    DONE = "DONE"
+class ChatSchema(BaseModel):
+    status: ChatStatusEnum
+    message: str
+    class Config:
+        extra = "forbid"
+
+# [Extract Model]의 Output Schema
+class Parties(BaseModel):
+    sender: Optional[str] = None
+    receiver: Optional[str] = None
+    relationship: Optional[str] = None
+    class Config:
+        extra = "forbid"
+class ExtractSchema(BaseModel):
+    parties: Parties
+    action: Optional[str] = None
+    result_or_damage: Optional[str] = None
+    legal_issue: Optional[str] = None
+    legal_domain: Optional[str] = None
+    user_intent: Optional[str] = None
+    class Config:
+        extra = "forbid"
+    
+# [Query Model]의 Output JSON
+class QueryStatusEnum(str, Enum):
+    sufficient = "sufficient"
+    warning = "warning"
+    mandatory = "mandatory"
+class InsufficientField(str, Enum):
+    parties = "parties"
+    action = "action"
+    result_or_damage = "result_or_damage"
+    legal_issue = "legal_issue"
+    legal_domain = "legal_domain"
+    user_intent = "user_intent"
+    class Config:
+        extra = "forbid"
+class QuerySchema(BaseModel):
+    status: QueryStatusEnum # 상태 표시: sufficient / warning / mandatory
+    # 쿼리 생성 (sufficient / warning 상태에서만 사용)
+    query_for_meaning: Optional[str] = None
+    query_for_keyword: Optional[str] = None
+    # 부족한 필드 목록 (warning / mandatory 상태)
+    insufficient_field: Optional[List[InsufficientField]] = None
+    # Chat Model 피드백용 메시지 (mandatory 상태에서만 존재)
+    feedback_to_chat: Optional[str] = None
+    class Config:
+        extra = "forbid"
+# [Answer Model]의 Output JSON
+    # (text만 생성)
+
+# === System prompts ===
 with open("./prompts/0.chat_model_system_prompt.txt", "r", encoding="utf-8") as f:
     chat_syst_prompt = f.read()
 with open("./prompts/1.extract_model_system_prompt.txt", "r", encoding="utf-8") as f:
@@ -99,68 +155,11 @@ def ask_question(userInput: UserQuery):
         return {"status": "error", "message": "세션이 없습니다."}
     
     print(f"[Sess:{session_id[:5]}... / Conv:{conv_id[5:10]}...] 유저 질문: {user_query}")
-    
-    # [Chat Model]의 Output Schema
-    class ChatStatusEnum(str, Enum):
-        CONTINUE = "CONTINUE"
-        DONE = "DONE"
-    class ChatSchema(BaseModel):
-        status: ChatStatusEnum
-        message: str
-        class Config:
-            extra = "forbid"
-
-    # [Extract Model]의 Output Schema
-    class Parties(BaseModel):
-        sender: Optional[str] = None
-        receiver: Optional[str] = None
-        relationship: Optional[str] = None
-        class Config:
-            extra = "forbid"
-    class ExtractSchema(BaseModel):
-        parties: Parties
-        action: Optional[str] = None
-        result_or_damage: Optional[str] = None
-        legal_issue: Optional[str] = None
-        legal_domain: Optional[str] = None
-        user_intent: Optional[str] = None
-        class Config:
-            extra = "forbid"
-        
-    # [Query Model]의 Output JSON
-    class QueryStatusEnum(str, Enum):
-        sufficient = "sufficient"
-        warning = "warning"
-        mandatory = "mandatory"
-    class InsufficientField(str, Enum):
-        parties = "parties"
-        action = "action"
-        result_or_damage = "result_or_damage"
-        legal_issue = "legal_issue"
-        legal_domain = "legal_domain"
-        user_intent = "user_intent"
-        class Config:
-            extra = "forbid"
-    class QuerySchema(BaseModel):
-        status: QueryStatusEnum # 상태 표시: sufficient / warning / mandatory
-        # 쿼리 생성 (sufficient / warning 상태에서만 사용)
-        query_for_meaning: Optional[str] = None
-        query_for_keyword: Optional[str] = None
-        # 부족한 필드 목록 (warning / mandatory 상태)
-        insufficient_field: Optional[List[InsufficientField]] = None
-        # Chat Model 피드백용 메시지 (mandatory 상태에서만 존재)
-        feedback_to_chat: Optional[str] = None
-        class Config:
-            extra = "forbid"
-    
-    # [Answer Model]의 Output JSON
-    # (text만 생성)
-
     print("[FastAPI]\tuser_query를 history에 넣는 중...")
     session_data[session_id]["conversations"][conv_id]["history"].append({"role": "user", "content": user_query})
 
 
-    # [Chat Model] 호출
+    # === [Chat Model] 호출 ===
     print(f"[Chat Model] \t-> 답변 생성 중...")
     history = session_data[session_id]["conversations"][conv_id]["history"]
     
@@ -184,7 +183,7 @@ def ask_question(userInput: UserQuery):
         return {"status": "ok", "answer": chat_msg}
 
 
-    # [Extract Model] 호출
+    # === [Extract Model] 호출 ===
     print(f"Extract Model 호출... [디버깅(No text): {chat_msg}...]")
     extract_response = openai_client.responses.parse(
         model=MODEL_NAME,
@@ -198,12 +197,15 @@ def ask_question(userInput: UserQuery):
     # output_parsed(Pydantic형태)
     extract_output = extract_response.output_parsed
     try:
-        print(f"[Extract Model]\t-> 대화에서 정보 추출됨: {json.dumps(extract_output.model_dump(), ensure_ascii=False, indent=2)}")
+        print(
+            f"[Extract Model]\t-> 대화에서 정보 추출됨: "
+            f"{json.dumps(extract_output.model_dump(), ensure_ascii=False, indent=2)}"
+        )
     except:
         print("[Extract Model]\t-> 대화에서 정보 추출됨 (raw):", extract_output)
 
 
-    # [Query Model] 호출
+    # === [Query Model] 호출 ===
     print(f"[Extract Model]\t-> Query Model 호출...")
     query_response = openai_client.responses.parse(
         model=MODEL_NAME,
@@ -249,7 +251,7 @@ def ask_question(userInput: UserQuery):
             f"{context_sum}"
         )
 
-        # [Answer Model] 호출 ===
+        # === [Answer Model] 호출 ===
         answer_response = openai_client.responses.create(
             model=MODEL_NAME,
             input=[
@@ -278,7 +280,7 @@ def ask_question(userInput: UserQuery):
     )
 
 
-    # [Chat Model] 호출
+    # === [Chat Model] 호출 ===
     print(f"[Chat Model] \t-> 피드백을 수용하여 질문 생성 중...")
     history = session_data[session_id]["conversations"][conv_id]["history"]
     
