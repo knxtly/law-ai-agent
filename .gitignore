@@ -5,7 +5,7 @@ __pycache__/
 data/chroma_db/
 
 # 가상환경
-venv/
+.venv/
 .env
 
 # IDE 설정
@@ -13,9 +13,12 @@ venv/
 .idea/
 
 # 산출물들
-*.json
-*.txt
+results/*
+
+# 테스팅
 test.py
+*.txt
 
 # 예외
 !requirements.txt
+!prompts/*.txt
